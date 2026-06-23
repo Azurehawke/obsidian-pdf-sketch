@@ -124,6 +124,10 @@ export default class PdfSketchPlugin extends Plugin {
                 return;
             }
 
+            // pdfjs transfers the ArrayBuffer to its worker, detaching it.
+            // Keep a separate copy for pdf-lib to use when saving.
+            const pdfBytesForSave = pdfBytes.slice(0);
+
             const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(pdfBytes) });
             let pdf: any;
             try {
@@ -211,7 +215,7 @@ export default class PdfSketchPlugin extends Plugin {
                 saveBtn.disabled = true;
                 saveBtn.setText('Saving…');
                 try {
-                    await this.flattenAndSave(file, pdfBytes, drawCanvases);
+                    await this.flattenAndSave(file, pdfBytesForSave, drawCanvases);
                     saveBtn.setText('Saved!');
                     setTimeout(() => {
                         saveBtn.disabled = false;
