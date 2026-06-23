@@ -126,9 +126,10 @@ export default class PdfSketchPlugin extends Plugin {
             setIcon(saveBtn, 'save');
             saveBtn.createEl('span', { text: 'Save' });
 
-            // ── Sticky toolbar via IntersectionObserver ───────────────────────
-            // A sentinel sits just above the toolbar; when it scrolls out of
-            // view above the viewport we fix the toolbar in place.
+            // ── Sticky toolbar ────────────────────────────────────────────────
+            // Obsidian ancestors may have CSS transforms which break
+            // position:fixed. Move the toolbar onto document.body when fixed
+            // so it escapes any transformed ancestor.
             const toolbarSentinel = container.createDiv();
             toolbarSentinel.style.height = '1px';
             container.insertBefore(toolbarSentinel, toolbar);
@@ -138,25 +139,48 @@ export default class PdfSketchPlugin extends Plugin {
             container.insertBefore(toolbarPlaceholder, toolbar.nextSibling);
 
             let toolbarFixed = false;
+
+            const fixToolbar = () => {
+                const cr = container.getBoundingClientRect();
+                document.body.appendChild(toolbar);
+                Object.assign(toolbar.style, {
+                    position: 'fixed',
+                    top: '0px',
+                    left: cr.left + 'px',
+                    width: cr.width + 'px',
+                    zIndex: '9999',
+                });
+                toolbarPlaceholder.style.height = '38px';
+            };
+
+            const unfixToolbar = () => {
+                container.insertBefore(toolbar, toolbarPlaceholder);
+                Object.assign(toolbar.style, {
+                    position: '', top: '', left: '', width: '', zIndex: '',
+                });
+                toolbarPlaceholder.style.height = '0';
+            };
+
+            // Keep width in sync if the container is resized while fixed
+            const resizeObserver = new ResizeObserver(() => {
+                if (toolbarFixed) fixToolbar();
+            });
+            resizeObserver.observe(container);
+
             const stickyObserver = new IntersectionObserver(([entry]) => {
                 const shouldFix = !entry.isIntersecting && entry.boundingClientRect.top < 0;
                 if (shouldFix === toolbarFixed) return;
                 toolbarFixed = shouldFix;
-                if (shouldFix) {
-                    const cr = container.getBoundingClientRect();
-                    toolbar.addClass('pdf-sketch-toolbar--fixed');
-                    toolbar.style.top   = '0px';
-                    toolbar.style.left  = cr.left + 'px';
-                    toolbar.style.width = cr.width + 'px';
-                    toolbarPlaceholder.style.height = '38px';
-                } else {
-                    toolbar.removeClass('pdf-sketch-toolbar--fixed');
-                    toolbar.style.top = toolbar.style.left = toolbar.style.width = '';
-                    toolbarPlaceholder.style.height = '0';
-                }
+                shouldFix ? fixToolbar() : unfixToolbar();
             }, { threshold: 0 });
             stickyObserver.observe(toolbarSentinel);
-            this.register(() => stickyObserver.disconnect());
+
+            this.register(() => {
+                stickyObserver.disconnect();
+                resizeObserver.disconnect();
+                // Return toolbar to container if it was moved to body
+                if (toolbarFixed) unfixToolbar();
+            });
 
             // ── Pages area ───────────────────────────────────────────────────
             const pagesEl = container.createDiv({ cls: 'pdf-sketch-pages' });
