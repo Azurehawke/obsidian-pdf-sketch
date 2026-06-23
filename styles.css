@@ -3,10 +3,7 @@
   width: 100%;
   border: 1px solid var(--background-modifier-border);
   border-radius: 8px;
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-  max-height: calc(100vh - 80px);
+  overflow: visible;
 }
 
 /* ── Toolbar ──────────────────────────────────────────────────────────── */
@@ -21,7 +18,13 @@
   box-sizing: border-box;
   overflow-x: auto;
   scrollbar-width: none;
-  flex-shrink: 0;
+  border-radius: 8px 8px 0 0;
+}
+.pdf-sketch-toolbar--fixed {
+  position: fixed;
+  z-index: 100;
+  border-radius: 0;
+  border-top: 1px solid var(--background-modifier-border);
 }
 .pdf-sketch-toolbar::-webkit-scrollbar { display: none; }
 
@@ -124,8 +127,6 @@
   gap: 8px;
   padding: 8px;
   background: var(--background-primary-alt);
-  overflow-y: auto;
-  flex: 1;
 }
 
 /* ── Single page wrapper ──────────────────────────────────────────────── */
