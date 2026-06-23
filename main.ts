@@ -1,5 +1,5 @@
 import { Plugin, TFile, setIcon } from 'obsidian';
-import * as pdfjsLib from 'pdfjs-dist';
+import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf';
 import { PDFDocument } from 'pdf-lib';
 
 // Run PDF.js in the main thread — no separate worker file needed
@@ -139,7 +139,7 @@ export default class PdfSketchPlugin extends Plugin {
                 pdfCanvas.style.width  = '100%';
                 pdfCanvas.style.height = 'auto';
 
-                await page.render({ canvasContext: pdfCanvas.getContext('2d')!, viewport, canvas: pdfCanvas }).promise;
+                await page.render({ canvasContext: pdfCanvas.getContext('2d')!, viewport }).promise;
 
                 // Drawing canvas (transparent overlay)
                 const drawCanvas    = wrapper.createEl('canvas', { cls: 'pdf-sketch-draw-canvas' });
