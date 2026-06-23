@@ -16,6 +16,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: softprops/action-gh-release@v2
         with:
+          overwrite: true
+          fail_on_unmatched_files: true
           files: |
             main.js
             manifest.json
