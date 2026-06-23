@@ -1,5 +1,7 @@
-import { Plugin, TFile, setIcon } from 'obsidian';
+import { Plugin, TFile, ItemView, WorkspaceLeaf, setIcon, ViewStateResult } from 'obsidian';
 import { PDFDocument } from 'pdf-lib';
+
+const VIEW_TYPE_PDF_SKETCH = 'pdf-sketch-view';
 
 type ToolMode = 'pen' | 'pencil' | 'marker' | 'highlighter' | 'eraser';
 
@@ -17,303 +19,234 @@ const DEFAULT_SETTINGS: SketchSettings = {
     snapLines: false,
 };
 
-export default class PdfSketchPlugin extends Plugin {
-    declare settings: SketchSettings;
+class PdfSketchView extends ItemView {
+    private plugin: PdfSketchPlugin;
+    filePath = '';
 
-    async onload() {
-        console.log('[pdf-sketch] plugin loading');
-        this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
-        console.log('[pdf-sketch] registering code block processor');
+    constructor(leaf: WorkspaceLeaf, plugin: PdfSketchPlugin) {
+        super(leaf);
+        this.plugin = plugin;
+    }
 
-        this.registerMarkdownCodeBlockProcessor('pdf-sketch', async (source, el, ctx) => {
-            console.log('[pdf-sketch] processor fired, source:', source);
-            const match = source.trim().match(/\[\[(.+?)\]\]/);
-            if (!match) {
-                console.log('[pdf-sketch] no wikilink found');
-                el.createEl('p', { cls: 'pdf-sketch-error', text: 'Usage: [[path/to/file.pdf]]' });
-                return;
-            }
+    getViewType()    { return VIEW_TYPE_PDF_SKETCH; }
+    getDisplayText() { return this.filePath ? (this.filePath.split('/').pop() ?? 'PDF Sketch') : 'PDF Sketch'; }
+    getIcon()        { return 'pencil'; }
 
-            console.log('[pdf-sketch] looking up file:', match[1]);
-            const file = this.app.metadataCache.getFirstLinkpathDest(match[1], ctx.sourcePath);
-            if (!(file instanceof TFile)) {
-                console.log('[pdf-sketch] file not found:', match[1]);
-                el.createEl('p', { cls: 'pdf-sketch-error', text: `File not found: ${match[1]}` });
-                return;
-            }
-            console.log('[pdf-sketch] file found:', file.path);
+    async setState(state: any, result: ViewStateResult) {
+        this.filePath = state.file ?? '';
+        await super.setState(state, result);
+        await this.renderView();
+    }
 
-            // Lazy-load pdfjs so a crash here doesn't prevent the plugin from loading
-            let pdfjsLib: typeof import('pdfjs-dist');
+    getState() {
+        return { file: this.filePath };
+    }
+
+    async onOpen() { /* populated by setState */ }
+
+    private async renderView() {
+        const { contentEl } = this;
+        contentEl.empty();
+        contentEl.addClass('pdf-sketch-view');
+
+        if (!this.filePath) {
+            contentEl.createEl('p', { cls: 'pdf-sketch-error', text: 'No file specified.' });
+            return;
+        }
+
+        const file = this.plugin.app.vault.getAbstractFileByPath(this.filePath);
+        if (!(file instanceof TFile)) {
+            contentEl.createEl('p', { cls: 'pdf-sketch-error', text: `File not found: ${this.filePath}` });
+            return;
+        }
+
+        // ── Toolbar ──────────────────────────────────────────────────────────
+        const toolbar = contentEl.createDiv({ cls: 'pdf-sketch-toolbar' });
+
+        const toolSelect = toolbar.createEl('select', { attr: { title: 'Drawing tool' } });
+        (['pen', 'pencil', 'marker', 'highlighter', 'eraser'] as ToolMode[]).forEach(t =>
+            toolSelect.createEl('option', { text: t[0].toUpperCase() + t.slice(1), value: t })
+        );
+        toolSelect.value = this.plugin.settings.tool;
+        toolSelect.addEventListener('change', () => {
+            this.plugin.settings.tool = toolSelect.value as ToolMode;
+            this.plugin.saveData(this.plugin.settings);
+        });
+
+        toolbar.createDiv({ cls: 'pdf-sketch-toolbar-sep' });
+
+        const snapBtn = toolbar.createEl('button', {
+            cls: 'pdf-sketch-toolbar-btn' + (this.plugin.settings.snapLines ? ' pdf-sketch-toolbar-btn--active' : ''),
+            attr: { title: 'Snap lines to 90°' },
+        });
+        setIcon(snapBtn, 'ruler');
+        snapBtn.createEl('span', { text: '90°' });
+        snapBtn.addEventListener('click', () => {
+            this.plugin.settings.snapLines = !this.plugin.settings.snapLines;
+            snapBtn.toggleClass('pdf-sketch-toolbar-btn--active', this.plugin.settings.snapLines);
+            this.plugin.saveData(this.plugin.settings);
+        });
+
+        toolbar.createDiv({ cls: 'pdf-sketch-toolbar-sep' });
+
+        const undoBtn = toolbar.createEl('button', { cls: 'pdf-sketch-toolbar-btn', attr: { title: 'Undo (Ctrl+Z)' } });
+        setIcon(undoBtn, 'undo-2');
+        undoBtn.createEl('span', { text: 'Undo' });
+        undoBtn.disabled = true;
+
+        const redoBtn = toolbar.createEl('button', { cls: 'pdf-sketch-toolbar-btn', attr: { title: 'Redo (Ctrl+Y)' } });
+        setIcon(redoBtn, 'redo-2');
+        redoBtn.createEl('span', { text: 'Redo' });
+        redoBtn.disabled = true;
+
+        toolbar.createDiv({ cls: 'pdf-sketch-toolbar-sep' });
+
+        const colorInput = toolbar.createEl('input', { type: 'color', attr: { title: 'Brush color' } });
+        colorInput.value = this.plugin.settings.color;
+        colorInput.addEventListener('change', () => {
+            this.plugin.settings.color = colorInput.value;
+            this.plugin.saveData(this.plugin.settings);
+        });
+
+        const brushInput = toolbar.createEl('input', {
+            type: 'range',
+            attr: { min: '1', max: '20', value: String(this.plugin.settings.brushSize), title: 'Brush size' }
+        });
+        const brushLabel = toolbar.createEl('span', { cls: 'pdf-sketch-width-label', text: String(this.plugin.settings.brushSize) });
+        brushInput.addEventListener('input',  () => brushLabel.textContent = brushInput.value);
+        brushInput.addEventListener('change', () => {
+            this.plugin.settings.brushSize = parseInt(brushInput.value);
+            this.plugin.saveData(this.plugin.settings);
+        });
+
+        toolbar.createDiv({ cls: 'pdf-sketch-toolbar-spacer' });
+
+        const saveBtn = toolbar.createEl('button', { cls: 'pdf-sketch-toolbar-btn pdf-sketch-toolbar-btn--save', attr: { title: 'Flatten and save to PDF' } });
+        setIcon(saveBtn, 'save');
+        saveBtn.createEl('span', { text: 'Save' });
+
+        // ── Pages ─────────────────────────────────────────────────────────────
+        const pagesEl = contentEl.createDiv({ cls: 'pdf-sketch-pages' });
+
+        // ── Load pdfjs ────────────────────────────────────────────────────────
+        let pdfjsLib: typeof import('pdfjs-dist');
+        try {
+            pdfjsLib = require('pdfjs-dist/legacy/build/pdf');
+            const workerB64: string = require('pdf-worker-inline');
+            const blob = new Blob([atob(workerB64)], { type: 'application/javascript' });
+            pdfjsLib.GlobalWorkerOptions.workerSrc = URL.createObjectURL(blob);
+        } catch (e) {
+            pagesEl.createEl('p', { cls: 'pdf-sketch-error', text: 'Failed to load PDF renderer: ' + e });
+            return;
+        }
+
+        // ── Read PDF ──────────────────────────────────────────────────────────
+        let pdfBytes: ArrayBuffer;
+        try {
+            pdfBytes = await this.plugin.app.vault.readBinary(file);
+        } catch (e) {
+            pagesEl.createEl('p', { cls: 'pdf-sketch-error', text: 'Could not read PDF file.' });
+            return;
+        }
+
+        const pdfBytesForSave = pdfBytes.slice(0);
+
+        let pdf: any;
+        try {
+            pdf = await pdfjsLib.getDocument({ data: new Uint8Array(pdfBytes) }).promise;
+        } catch (e) {
+            pagesEl.createEl('p', { cls: 'pdf-sketch-error', text: 'Could not parse PDF.' });
+            return;
+        }
+
+        // ── Render pages ──────────────────────────────────────────────────────
+        const drawCanvases: HTMLCanvasElement[] = [];
+        const undoStacks: ImageData[][] = [];
+        const redoStacks: ImageData[][] = [];
+        let activePage = 0;
+
+        const syncUndoRedo = (pageIdx: number) => {
+            undoBtn.disabled = undoStacks[pageIdx].length === 0;
+            redoBtn.disabled = redoStacks[pageIdx].length === 0;
+        };
+
+        for (let i = 1; i <= pdf.numPages; i++) {
+            const page     = await pdf.getPage(i);
+            const viewport = page.getViewport({ scale: 1.5 });
+            const wrapper  = pagesEl.createDiv({ cls: 'pdf-sketch-page-wrapper' });
+
+            const pdfCanvas = wrapper.createEl('canvas', { cls: 'pdf-sketch-pdf-canvas' });
+            pdfCanvas.width  = viewport.width;
+            pdfCanvas.height = viewport.height;
+            await page.render({ canvasContext: pdfCanvas.getContext('2d')!, viewport }).promise;
+
+            const drawCanvas = wrapper.createEl('canvas', { cls: 'pdf-sketch-draw-canvas' });
+            drawCanvas.width  = viewport.width;
+            drawCanvas.height = viewport.height;
+
+            drawCanvases.push(drawCanvas);
+            undoStacks.push([]);
+            redoStacks.push([]);
+
+            const pageIdx = i - 1;
+            drawCanvas.addEventListener('pointerdown', () => {
+                activePage = pageIdx;
+                syncUndoRedo(pageIdx);
+            });
+
+            this.attachDrawing(drawCanvas, pageIdx, toolSelect, colorInput, brushInput,
+                undoStacks, redoStacks, () => syncUndoRedo(pageIdx), snapBtn);
+        }
+
+        // ── Undo / Redo ───────────────────────────────────────────────────────
+        undoBtn.addEventListener('click', () => {
+            const stack = undoStacks[activePage];
+            if (!stack.length) return;
+            const ctx = drawCanvases[activePage].getContext('2d')!;
+            redoStacks[activePage].push(ctx.getImageData(0, 0, drawCanvases[activePage].width, drawCanvases[activePage].height));
+            ctx.putImageData(stack.pop()!, 0, 0);
+            syncUndoRedo(activePage);
+        });
+
+        redoBtn.addEventListener('click', () => {
+            const stack = redoStacks[activePage];
+            if (!stack.length) return;
+            const ctx = drawCanvases[activePage].getContext('2d')!;
+            undoStacks[activePage].push(ctx.getImageData(0, 0, drawCanvases[activePage].width, drawCanvases[activePage].height));
+            ctx.putImageData(stack.pop()!, 0, 0);
+            syncUndoRedo(activePage);
+        });
+
+        // ── Save ──────────────────────────────────────────────────────────────
+        saveBtn.addEventListener('click', async () => {
+            saveBtn.disabled = true;
+            saveBtn.setText('Saving…');
             try {
-                pdfjsLib = require('pdfjs-dist/legacy/build/pdf');
-                // Inline worker as a blob URL so no separate worker file is needed
-                const workerB64: string = require('pdf-worker-inline');
-                const workerSrc = atob(workerB64);
-                const blob = new Blob([workerSrc], { type: 'application/javascript' });
-                pdfjsLib.GlobalWorkerOptions.workerSrc = URL.createObjectURL(blob);
-                console.log('[pdf-sketch] pdfjs loaded');
-            } catch (e) {
-                console.error('[pdf-sketch] failed to load pdfjs:', e);
-                el.createEl('p', { cls: 'pdf-sketch-error', text: 'Failed to load PDF renderer: ' + e });
-                return;
-            }
-
-            const container = el.createDiv({ cls: 'pdf-sketch-container' });
-
-            // ── Toolbar ──────────────────────────────────────────────────────
-            const toolbar = container.createDiv({ cls: 'pdf-sketch-toolbar' });
-
-            const toolSelect = toolbar.createEl('select', { attr: { title: 'Drawing tool' } });
-            (['pen', 'pencil', 'marker', 'highlighter', 'eraser'] as ToolMode[]).forEach(t =>
-                toolSelect.createEl('option', { text: t[0].toUpperCase() + t.slice(1), value: t })
-            );
-            toolSelect.value = this.settings.tool;
-            toolSelect.addEventListener('change', () => {
-                this.settings.tool = toolSelect.value as ToolMode;
-                this.saveData(this.settings);
-            });
-
-            toolbar.createDiv({ cls: 'pdf-sketch-toolbar-sep' });
-
-            const snapBtn = toolbar.createEl('button', {
-                cls: 'pdf-sketch-toolbar-btn' + (this.settings.snapLines ? ' pdf-sketch-toolbar-btn--active' : ''),
-                attr: { title: 'Snap lines to 90°' },
-            });
-            setIcon(snapBtn, 'ruler');
-            snapBtn.createEl('span', { text: '90°' });
-            snapBtn.addEventListener('click', () => {
-                this.settings.snapLines = !this.settings.snapLines;
-                snapBtn.toggleClass('pdf-sketch-toolbar-btn--active', this.settings.snapLines);
-                this.saveData(this.settings);
-            });
-
-            toolbar.createDiv({ cls: 'pdf-sketch-toolbar-sep' });
-
-            const undoBtn = toolbar.createEl('button', { cls: 'pdf-sketch-toolbar-btn', attr: { title: 'Undo (Ctrl+Z)' } });
-            setIcon(undoBtn, 'undo-2');
-            undoBtn.createEl('span', { text: 'Undo' });
-            undoBtn.disabled = true;
-
-            const redoBtn = toolbar.createEl('button', { cls: 'pdf-sketch-toolbar-btn', attr: { title: 'Redo (Ctrl+Y)' } });
-            setIcon(redoBtn, 'redo-2');
-            redoBtn.createEl('span', { text: 'Redo' });
-            redoBtn.disabled = true;
-
-            toolbar.createDiv({ cls: 'pdf-sketch-toolbar-sep' });
-
-            const colorInput = toolbar.createEl('input', { type: 'color', attr: { title: 'Brush color' } });
-            colorInput.value = this.settings.color;
-            colorInput.addEventListener('change', () => {
-                this.settings.color = colorInput.value;
-                this.saveData(this.settings);
-            });
-
-            const brushInput = toolbar.createEl('input', {
-                type: 'range',
-                attr: { min: '1', max: '20', value: String(this.settings.brushSize), title: 'Brush size' }
-            });
-            const brushLabel = toolbar.createEl('span', { cls: 'pdf-sketch-width-label', text: String(this.settings.brushSize) });
-            brushInput.addEventListener('input',  () => brushLabel.textContent = brushInput.value);
-            brushInput.addEventListener('change', () => {
-                this.settings.brushSize = parseInt(brushInput.value);
-                this.saveData(this.settings);
-            });
-
-            toolbar.createDiv({ cls: 'pdf-sketch-toolbar-spacer' });
-
-            const saveBtn = toolbar.createEl('button', { cls: 'pdf-sketch-toolbar-btn pdf-sketch-toolbar-btn--save', attr: { title: 'Flatten and save to PDF' } });
-            setIcon(saveBtn, 'save');
-            saveBtn.createEl('span', { text: 'Save' });
-
-            // ── Sticky toolbar ────────────────────────────────────────────────
-            // Obsidian scrolls an inner container, not the window, so
-            // IntersectionObserver/scroll events on the wrong root never fire.
-            // A rAF loop checking the sentinel's position is simple and reliable.
-            const toolbarSentinel = container.createDiv();
-            toolbarSentinel.style.height = '1px';
-            container.insertBefore(toolbarSentinel, toolbar);
-
-            const toolbarPlaceholder = container.createDiv();
-            toolbarPlaceholder.style.height = '0';
-            container.insertBefore(toolbarPlaceholder, toolbar.nextSibling);
-
-            let toolbarFixed = false;
-
-            const fixToolbar = () => {
-                const cr = container.getBoundingClientRect();
-                document.body.appendChild(toolbar);
-                Object.assign(toolbar.style, {
-                    position: 'fixed',
-                    top: '0px',
-                    left: cr.left + 'px',
-                    width: cr.width + 'px',
-                    zIndex: '9999',
-                });
-                toolbarPlaceholder.style.height = '38px';
-            };
-
-            const unfixToolbar = () => {
-                container.insertBefore(toolbar, toolbarPlaceholder);
-                Object.assign(toolbar.style, {
-                    position: '', top: '', left: '', width: '', zIndex: '',
-                });
-                toolbarPlaceholder.style.height = '0';
-            };
-
-            let rafId: number;
-            const tick = () => {
-                const rect = toolbarSentinel.getBoundingClientRect();
-                const shouldFix = rect.bottom < 0;
-                if (shouldFix !== toolbarFixed) {
-                    toolbarFixed = shouldFix;
-                    shouldFix ? fixToolbar() : unfixToolbar();
-                } else if (toolbarFixed) {
-                    // Keep left/width in sync while fixed (e.g. panel resize)
-                    const cr = container.getBoundingClientRect();
-                    toolbar.style.left  = cr.left + 'px';
-                    toolbar.style.width = cr.width + 'px';
-                }
-                rafId = requestAnimationFrame(tick);
-            };
-            rafId = requestAnimationFrame(tick);
-
-            this.register(() => {
-                cancelAnimationFrame(rafId);
-                if (toolbarFixed) unfixToolbar();
-            });
-
-            // ── Pages area ───────────────────────────────────────────────────
-            const pagesEl = container.createDiv({ cls: 'pdf-sketch-pages' });
-
-            // ── Load PDF ─────────────────────────────────────────────────────
-            let pdfBytes: ArrayBuffer;
-            try {
-                pdfBytes = await this.app.vault.readBinary(file);
-                console.log('[pdf-sketch] read PDF bytes:', pdfBytes.byteLength);
-            } catch (e) {
-                console.error('[pdf-sketch] failed to read file:', e);
-                pagesEl.createEl('p', { cls: 'pdf-sketch-error', text: 'Could not read PDF file.' });
-                return;
-            }
-
-            // pdfjs transfers the ArrayBuffer to its worker, detaching it.
-            // Keep a separate copy for pdf-lib to use when saving.
-            const pdfBytesForSave = pdfBytes.slice(0);
-
-            const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(pdfBytes) });
-            let pdf: any;
-            try {
-                pdf = await loadingTask.promise;
-                console.log('[pdf-sketch] PDF loaded, pages:', pdf.numPages);
-            } catch (e) {
-                console.error('[pdf-sketch] failed to parse PDF:', e);
-                pagesEl.createEl('p', { cls: 'pdf-sketch-error', text: 'Could not parse PDF.' });
-                return;
-            }
-
-            // ── Render pages ─────────────────────────────────────────────────
-            const drawCanvases: HTMLCanvasElement[] = [];
-
-            // Per-page undo/redo stacks
-            const undoStacks: ImageData[][] = [];
-            const redoStacks: ImageData[][] = [];
-
-            const syncUndoRedo = (pageIdx: number) => {
-                undoBtn.disabled = undoStacks[pageIdx].length === 0;
-                redoBtn.disabled = redoStacks[pageIdx].length === 0;
-            };
-
-            let activePage = 0;
-
-            for (let i = 1; i <= pdf.numPages; i++) {
-                const page     = await pdf.getPage(i);
-                const viewport = page.getViewport({ scale: 1.5 });
-
-                const wrapper = pagesEl.createDiv({ cls: 'pdf-sketch-page-wrapper' });
-
-                // PDF render canvas (background, read-only)
-                const pdfCanvas    = wrapper.createEl('canvas', { cls: 'pdf-sketch-pdf-canvas' });
-                pdfCanvas.width    = viewport.width;
-                pdfCanvas.height   = viewport.height;
-                pdfCanvas.style.width  = '100%';
-                pdfCanvas.style.height = 'auto';
-
-                await page.render({ canvasContext: pdfCanvas.getContext('2d')!, viewport }).promise;
-
-                // Drawing canvas (transparent overlay)
-                const drawCanvas    = wrapper.createEl('canvas', { cls: 'pdf-sketch-draw-canvas' });
-                drawCanvas.width    = viewport.width;
-                drawCanvas.height   = viewport.height;
-                drawCanvas.style.width  = '100%';
-                drawCanvas.style.height = 'auto';
-
-                drawCanvases.push(drawCanvas);
-                undoStacks.push([]);
-                redoStacks.push([]);
-
-                const pageIdx = i - 1;
-
-                // Focus tracking for undo/redo buttons
-                drawCanvas.addEventListener('pointerdown', () => {
-                    activePage = pageIdx;
-                    syncUndoRedo(pageIdx);
-                });
-
-                this.attachDrawing(drawCanvas, pageIdx, toolSelect, colorInput, brushInput,
-                    undoStacks, redoStacks, () => syncUndoRedo(pageIdx), snapBtn);
-            }
-
-            // ── Undo / Redo button handlers ───────────────────────────────────
-            undoBtn.addEventListener('click', () => {
-                const stack = undoStacks[activePage];
-                if (!stack.length) return;
-                const ctx = drawCanvases[activePage].getContext('2d')!;
-                redoStacks[activePage].push(ctx.getImageData(0, 0, drawCanvases[activePage].width, drawCanvases[activePage].height));
-                ctx.putImageData(stack.pop()!, 0, 0);
-                syncUndoRedo(activePage);
-            });
-
-            redoBtn.addEventListener('click', () => {
-                const stack = redoStacks[activePage];
-                if (!stack.length) return;
-                const ctx = drawCanvases[activePage].getContext('2d')!;
-                undoStacks[activePage].push(ctx.getImageData(0, 0, drawCanvases[activePage].width, drawCanvases[activePage].height));
-                ctx.putImageData(stack.pop()!, 0, 0);
-                syncUndoRedo(activePage);
-            });
-
-            // ── Save ──────────────────────────────────────────────────────────
-            saveBtn.addEventListener('click', async () => {
-                saveBtn.disabled = true;
-                saveBtn.setText('Saving…');
-                try {
-                    await this.flattenAndSave(file, pdfBytesForSave, drawCanvases);
-                    saveBtn.setText('Saved!');
-                    setTimeout(() => {
-                        saveBtn.disabled = false;
-                        const span = saveBtn.querySelector('span');
-                        if (span) span.textContent = 'Save';
-                    }, 1500);
-                } catch (e) {
-                    console.error('pdf-sketch save error', e);
-                    saveBtn.setText('Error: ' + (e instanceof Error ? e.message : String(e)));
+                await this.flattenAndSave(file, pdfBytesForSave, drawCanvases);
+                saveBtn.setText('Saved!');
+                setTimeout(() => {
                     saveBtn.disabled = false;
-                }
-            });
+                    const span = saveBtn.querySelector('span');
+                    if (span) span.textContent = 'Save';
+                }, 1500);
+            } catch (e) {
+                console.error('pdf-sketch save error', e);
+                saveBtn.setText('Error: ' + (e instanceof Error ? e.message : String(e)));
+                saveBtn.disabled = false;
+            }
         });
     }
 
     private attachDrawing(
-        canvas:      HTMLCanvasElement,
-        pageIdx:     number,
-        toolSelect:  HTMLSelectElement,
-        colorInput:  HTMLInputElement,
-        brushInput:  HTMLInputElement,
-        undoStacks:  ImageData[][],
-        redoStacks:  ImageData[][],
-        onStroke:    () => void,
-        snapBtn:     HTMLButtonElement,
+        canvas:     HTMLCanvasElement,
+        pageIdx:    number,
+        toolSelect: HTMLSelectElement,
+        colorInput: HTMLInputElement,
+        brushInput: HTMLInputElement,
+        undoStacks: ImageData[][],
+        redoStacks: ImageData[][],
+        onStroke:   () => void,
+        snapBtn:    HTMLButtonElement,
     ) {
         const ctx2d = canvas.getContext('2d')!;
         ctx2d.lineCap  = 'round';
@@ -331,6 +264,9 @@ export default class PdfSketchPlugin extends Plugin {
                 y: (e.clientY - r.top)  * (canvas.height / r.height),
             };
         };
+
+        const getTool = (e: PointerEvent): ToolMode =>
+            (e.buttons === 32 || e.buttons === 2) ? 'eraser' : toolSelect.value as ToolMode;
 
         const applyTool = (tool: ToolMode, w: number) => {
             if (tool === 'eraser') {
@@ -361,16 +297,13 @@ export default class PdfSketchPlugin extends Plugin {
             }
         };
 
-        const getTool = (e: PointerEvent): ToolMode =>
-            (e.buttons === 32 || e.buttons === 2) ? 'eraser' : toolSelect.value as ToolMode;
-
         canvas.addEventListener('pointerdown', (e) => {
             undoStacks[pageIdx].push(ctx2d.getImageData(0, 0, canvas.width, canvas.height));
             if (undoStacks[pageIdx].length > 30) undoStacks[pageIdx].shift();
             redoStacks[pageIdx].length = 0;
 
-            drawing = true;
-            startPos = cssToCanvas(e);
+            drawing   = true;
+            startPos  = cssToCanvas(e);
             strokePoints = [startPos];
 
             const tool = getTool(e);
@@ -438,9 +371,9 @@ export default class PdfSketchPlugin extends Plugin {
     }
 
     private async flattenAndSave(
-        file:         TFile,
+        file:          TFile,
         originalBytes: ArrayBuffer,
-        drawCanvases: HTMLCanvasElement[],
+        drawCanvases:  HTMLCanvasElement[],
     ) {
         const pdfDoc = await PDFDocument.load(originalBytes);
         const pages  = pdfDoc.getPages();
@@ -449,18 +382,15 @@ export default class PdfSketchPlugin extends Plugin {
             const canvas = drawCanvases[i];
             if (!canvas) continue;
 
-            // Skip pages with no marks
             const ctx  = canvas.getContext('2d')!;
             const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
-            const hasMarks = data.some((v, idx) => idx % 4 === 3 && v > 0);
-            if (!hasMarks) continue;
+            if (!data.some((v, idx) => idx % 4 === 3 && v > 0)) continue;
 
             const pngBytes = Uint8Array.from(
                 atob(canvas.toDataURL('image/png').split(',')[1]),
                 c => c.charCodeAt(0)
             );
             const pngImage = await pdfDoc.embedPng(pngBytes);
-
             const page = pages[i];
             const { width, height } = page.getSize();
             page.drawImage(pngImage, { x: 0, y: 0, width, height });
@@ -468,6 +398,52 @@ export default class PdfSketchPlugin extends Plugin {
 
         const saved = await pdfDoc.save();
         const buf = saved.buffer.slice(saved.byteOffset, saved.byteOffset + saved.byteLength);
-        await this.app.vault.modifyBinary(file, buf as ArrayBuffer);
+        await this.plugin.app.vault.modifyBinary(file, buf as ArrayBuffer);
+    }
+}
+
+export default class PdfSketchPlugin extends Plugin {
+    declare settings: SketchSettings;
+
+    async onload() {
+        this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+
+        this.registerView(VIEW_TYPE_PDF_SKETCH, (leaf) => new PdfSketchView(leaf, this));
+
+        this.registerMarkdownCodeBlockProcessor('pdf-sketch', async (source, el, ctx) => {
+            const match = source.trim().match(/\[\[(.+?)\]\]/);
+            if (!match) {
+                el.createEl('p', { cls: 'pdf-sketch-error', text: 'Usage: [[path/to/file.pdf]]' });
+                return;
+            }
+
+            const file = this.app.metadataCache.getFirstLinkpathDest(match[1], ctx.sourcePath);
+            if (!(file instanceof TFile)) {
+                el.createEl('p', { cls: 'pdf-sketch-error', text: `File not found: ${match[1]}` });
+                return;
+            }
+
+            const btn = el.createEl('button', { cls: 'pdf-sketch-open-btn' });
+            setIcon(btn, 'pencil');
+            btn.createEl('span', { text: `Open ${file.name} in PDF Sketch` });
+            btn.addEventListener('click', () => this.openView(file));
+        });
+    }
+
+    async onunload() {
+        this.app.workspace.detachLeavesOfType(VIEW_TYPE_PDF_SKETCH);
+    }
+
+    async openView(file: TFile) {
+        // Reuse an existing leaf for this file if one is open
+        for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE_PDF_SKETCH)) {
+            if ((leaf.view as PdfSketchView).filePath === file.path) {
+                this.app.workspace.revealLeaf(leaf);
+                return;
+            }
+        }
+        const leaf = this.app.workspace.getLeaf('tab');
+        await leaf.setViewState({ type: VIEW_TYPE_PDF_SKETCH, state: { file: file.path } });
+        this.app.workspace.revealLeaf(leaf);
     }
 }
