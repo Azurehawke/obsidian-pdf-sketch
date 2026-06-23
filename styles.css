@@ -3,7 +3,10 @@
   width: 100%;
   border: 1px solid var(--background-modifier-border);
   border-radius: 8px;
-  overflow: visible;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100vh - 80px);
 }
 
 /* ── Toolbar ──────────────────────────────────────────────────────────── */
@@ -18,9 +21,7 @@
   box-sizing: border-box;
   overflow-x: auto;
   scrollbar-width: none;
-  position: sticky;
-  top: 0;
-  z-index: 10;
+  flex-shrink: 0;
 }
 .pdf-sketch-toolbar::-webkit-scrollbar { display: none; }
 
@@ -123,6 +124,8 @@
   gap: 8px;
   padding: 8px;
   background: var(--background-primary-alt);
+  overflow-y: auto;
+  flex: 1;
 }
 
 /* ── Single page wrapper ──────────────────────────────────────────────── */
