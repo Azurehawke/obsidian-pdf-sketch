@@ -3,7 +3,7 @@
   width: 100%;
   border: 1px solid var(--background-modifier-border);
   border-radius: 8px;
-  overflow: hidden;
+  overflow: visible;
 }
 
 /* ── Toolbar ──────────────────────────────────────────────────────────── */
