@@ -45,7 +45,11 @@ export default class PdfSketchPlugin extends Plugin {
             let pdfjsLib: typeof import('pdfjs-dist');
             try {
                 pdfjsLib = require('pdfjs-dist/legacy/build/pdf');
-                pdfjsLib.GlobalWorkerOptions.workerSrc = '';
+                // Inline worker as a blob URL so no separate worker file is needed
+                const workerB64: string = require('pdf-worker-inline');
+                const workerSrc = atob(workerB64);
+                const blob = new Blob([workerSrc], { type: 'application/javascript' });
+                pdfjsLib.GlobalWorkerOptions.workerSrc = URL.createObjectURL(blob);
                 console.log('[pdf-sketch] pdfjs loaded');
             } catch (e) {
                 console.error('[pdf-sketch] failed to load pdfjs:', e);
