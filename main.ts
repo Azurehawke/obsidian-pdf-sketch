@@ -265,6 +265,7 @@ export default class PdfSketchPlugin extends Plugin {
         let drawing = false;
         let startPos = { x: 0, y: 0 };
         let preStrokeSnapshot: ImageData | null = null;
+        let strokePoints: { x: number; y: number }[] = [];
 
         const cssToCanvas = (e: PointerEvent) => {
             const r = canvas.getBoundingClientRect();
@@ -313,13 +314,14 @@ export default class PdfSketchPlugin extends Plugin {
 
             drawing = true;
             startPos = cssToCanvas(e);
+            strokePoints = [startPos];
 
             const tool = getTool(e);
             const w    = parseInt(brushInput.value);
             applyTool(tool, w);
 
-            if (snapBtn.hasClass('pdf-sketch-toolbar-btn--active') && tool !== 'eraser') {
-                // Snapshot before stroke so we can redraw clean line each move
+            const needsSnapshot = (snapBtn.hasClass('pdf-sketch-toolbar-btn--active') || tool === 'highlighter') && tool !== 'eraser';
+            if (needsSnapshot) {
                 preStrokeSnapshot = ctx2d.getImageData(0, 0, canvas.width, canvas.height);
             } else {
                 preStrokeSnapshot = null;
@@ -338,18 +340,25 @@ export default class PdfSketchPlugin extends Plugin {
             let pos = cssToCanvas(e);
 
             if (preStrokeSnapshot) {
-                // Snap to horizontal or vertical
-                const dx = Math.abs(pos.x - startPos.x);
-                const dy = Math.abs(pos.y - startPos.y);
-                if (dx >= dy) {
-                    pos = { x: pos.x, y: startPos.y };
+                const snap = snapBtn.hasClass('pdf-sketch-toolbar-btn--active') && tool !== 'eraser';
+                if (snap) {
+                    const dx = Math.abs(pos.x - startPos.x);
+                    const dy = Math.abs(pos.y - startPos.y);
+                    pos = dx >= dy ? { x: pos.x, y: startPos.y } : { x: startPos.x, y: pos.y };
                 } else {
-                    pos = { x: startPos.x, y: pos.y };
+                    strokePoints.push(pos);
                 }
                 ctx2d.putImageData(preStrokeSnapshot, 0, 0);
                 ctx2d.beginPath();
-                ctx2d.moveTo(startPos.x, startPos.y);
-                ctx2d.lineTo(pos.x, pos.y);
+                if (snap) {
+                    ctx2d.moveTo(startPos.x, startPos.y);
+                    ctx2d.lineTo(pos.x, pos.y);
+                } else {
+                    ctx2d.moveTo(strokePoints[0].x, strokePoints[0].y);
+                    for (let i = 1; i < strokePoints.length; i++) {
+                        ctx2d.lineTo(strokePoints[i].x, strokePoints[i].y);
+                    }
+                }
                 ctx2d.stroke();
             } else {
                 ctx2d.lineTo(pos.x, pos.y);
@@ -361,6 +370,7 @@ export default class PdfSketchPlugin extends Plugin {
             if (!drawing) return;
             drawing = false;
             preStrokeSnapshot = null;
+            strokePoints = [];
             ctx2d.globalAlpha = 1;
             ctx2d.lineCap = 'round';
             onStroke();
