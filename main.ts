@@ -320,7 +320,8 @@ export default class PdfSketchPlugin extends Plugin {
             const w    = parseInt(brushInput.value);
             applyTool(tool, w);
 
-            const needsSnapshot = (snapBtn.hasClass('pdf-sketch-toolbar-btn--active') || tool === 'highlighter') && tool !== 'eraser';
+            const isSnap = snapBtn.hasClass('pdf-sketch-toolbar-btn--active');
+            const needsSnapshot = isSnap || tool === 'highlighter';
             if (needsSnapshot) {
                 preStrokeSnapshot = ctx2d.getImageData(0, 0, canvas.width, canvas.height);
             } else {
@@ -340,8 +341,8 @@ export default class PdfSketchPlugin extends Plugin {
             let pos = cssToCanvas(e);
 
             if (preStrokeSnapshot) {
-                const snap = snapBtn.hasClass('pdf-sketch-toolbar-btn--active') && tool !== 'eraser';
-                if (snap) {
+                const isSnap = snapBtn.hasClass('pdf-sketch-toolbar-btn--active');
+                if (isSnap) {
                     const dx = Math.abs(pos.x - startPos.x);
                     const dy = Math.abs(pos.y - startPos.y);
                     pos = dx >= dy ? { x: pos.x, y: startPos.y } : { x: startPos.x, y: pos.y };
@@ -350,7 +351,7 @@ export default class PdfSketchPlugin extends Plugin {
                 }
                 ctx2d.putImageData(preStrokeSnapshot, 0, 0);
                 ctx2d.beginPath();
-                if (snap) {
+                if (isSnap) {
                     ctx2d.moveTo(startPos.x, startPos.y);
                     ctx2d.lineTo(pos.x, pos.y);
                 } else {
