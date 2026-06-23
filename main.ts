@@ -127,9 +127,9 @@ export default class PdfSketchPlugin extends Plugin {
             saveBtn.createEl('span', { text: 'Save' });
 
             // ── Sticky toolbar ────────────────────────────────────────────────
-            // Obsidian ancestors may have CSS transforms which break
-            // position:fixed. Move the toolbar onto document.body when fixed
-            // so it escapes any transformed ancestor.
+            // Obsidian scrolls an inner container, not the window, so
+            // IntersectionObserver/scroll events on the wrong root never fire.
+            // A rAF loop checking the sentinel's position is simple and reliable.
             const toolbarSentinel = container.createDiv();
             toolbarSentinel.style.height = '1px';
             container.insertBefore(toolbarSentinel, toolbar);
@@ -161,24 +161,25 @@ export default class PdfSketchPlugin extends Plugin {
                 toolbarPlaceholder.style.height = '0';
             };
 
-            // Keep width in sync if the container is resized while fixed
-            const resizeObserver = new ResizeObserver(() => {
-                if (toolbarFixed) fixToolbar();
-            });
-            resizeObserver.observe(container);
-
-            const stickyObserver = new IntersectionObserver(([entry]) => {
-                const shouldFix = !entry.isIntersecting && entry.boundingClientRect.top < 0;
-                if (shouldFix === toolbarFixed) return;
-                toolbarFixed = shouldFix;
-                shouldFix ? fixToolbar() : unfixToolbar();
-            }, { threshold: 0 });
-            stickyObserver.observe(toolbarSentinel);
+            let rafId: number;
+            const tick = () => {
+                const rect = toolbarSentinel.getBoundingClientRect();
+                const shouldFix = rect.bottom < 0;
+                if (shouldFix !== toolbarFixed) {
+                    toolbarFixed = shouldFix;
+                    shouldFix ? fixToolbar() : unfixToolbar();
+                } else if (toolbarFixed) {
+                    // Keep left/width in sync while fixed (e.g. panel resize)
+                    const cr = container.getBoundingClientRect();
+                    toolbar.style.left  = cr.left + 'px';
+                    toolbar.style.width = cr.width + 'px';
+                }
+                rafId = requestAnimationFrame(tick);
+            };
+            rafId = requestAnimationFrame(tick);
 
             this.register(() => {
-                stickyObserver.disconnect();
-                resizeObserver.disconnect();
-                // Return toolbar to container if it was moved to body
+                cancelAnimationFrame(rafId);
                 if (toolbarFixed) unfixToolbar();
             });
 
