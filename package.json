@@ -14,5 +14,9 @@
     "obsidian": "latest",
     "tslib": "^2.6.0",
     "typescript": "^5.4.0"
+  },
+  "dependencies": {
+    "pdf-lib": "^1.17.1",
+    "pdfjs-dist": "^6.0.227"
   }
 }

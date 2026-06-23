@@ -4,7 +4,6 @@
   border: 1px solid var(--background-modifier-border);
   border-radius: 8px;
   overflow: hidden;
-  touch-action: none;
 }
 
 /* ── Toolbar ──────────────────────────────────────────────────────────── */
@@ -19,10 +18,12 @@
   box-sizing: border-box;
   overflow-x: auto;
   scrollbar-width: none;
+  position: sticky;
+  top: 0;
+  z-index: 10;
 }
 .pdf-sketch-toolbar::-webkit-scrollbar { display: none; }
 
-/* ── Dropdowns (tool + paper) ─────────────────────────────────────────── */
 .pdf-sketch-toolbar select {
   height: 26px;
   font-size: 12px;
@@ -35,7 +36,6 @@
   flex-shrink: 0;
 }
 
-/* ── Color swatch ─────────────────────────────────────────────────────── */
 .pdf-sketch-toolbar input[type="color"] {
   -webkit-appearance: none;
   appearance: none;
@@ -51,7 +51,6 @@
 .pdf-sketch-toolbar input[type="color"]::-webkit-color-swatch-wrapper { padding: 2px; }
 .pdf-sketch-toolbar input[type="color"]::-webkit-color-swatch { border: none; border-radius: 3px; }
 
-/* ── Sliders (brush size + canvas width) ─────────────────────────────── */
 .pdf-sketch-toolbar input[type="range"] {
   width: 60px;
   flex-shrink: 0;
@@ -59,7 +58,6 @@
   cursor: pointer;
 }
 
-/* ── Numeric / percentage labels ──────────────────────────────────────── */
 .pdf-sketch-width-label {
   font-size: 11px;
   color: var(--text-muted);
@@ -67,15 +65,7 @@
   text-align: right;
   flex-shrink: 0;
 }
-.pdf-sketch-pct-label {
-  font-size: 11px;
-  color: var(--text-muted);
-  min-width: 30px;
-  text-align: right;
-  flex-shrink: 0;
-}
 
-/* ── Separator ────────────────────────────────────────────────────────── */
 .pdf-sketch-toolbar-sep {
   width: 1px;
   height: 18px;
@@ -84,10 +74,8 @@
   margin: 0 2px;
 }
 
-/* ── Spacer ───────────────────────────────────────────────────────────── */
 .pdf-sketch-toolbar-spacer { flex: 1; }
 
-/* ── Action buttons (icon + text label) ───────────────────────────────── */
 .pdf-sketch-toolbar-btn {
   display: flex;
   align-items: center;
@@ -115,31 +103,52 @@
   background: transparent;
   color: var(--text-muted);
 }
-.pdf-sketch-toolbar-btn--danger { color: var(--text-faint); }
-.pdf-sketch-toolbar-btn--danger:hover {
-  color: var(--text-error);
-  background: var(--background-modifier-hover);
+.pdf-sketch-toolbar-btn--save {
+  color: var(--interactive-accent);
+  font-weight: 500;
 }
 
-/* ── Canvas ───────────────────────────────────────────────────────────── */
-.pdf-sketch-canvas {
+/* ── Pages ────────────────────────────────────────────────────────────── */
+.pdf-sketch-pages {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px;
+  background: var(--background-primary-alt);
+}
+
+/* ── Single page wrapper ──────────────────────────────────────────────── */
+.pdf-sketch-page-wrapper {
+  position: relative;
+  line-height: 0;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.25);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+/* PDF background canvas */
+.pdf-sketch-pdf-canvas {
   display: block;
   width: 100%;
-  cursor: crosshair;
+  height: auto;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
-/* ── Canvas overlay (delete button, bottom-right) ─────────────────────── */
-.pdf-sketch-canvas-actions {
+/* Drawing overlay canvas */
+.pdf-sketch-draw-canvas {
   position: absolute;
-  bottom: 8px;
-  right: 8px;
-  display: flex;
-  gap: 4px;
-  opacity: 0;
-  transition: opacity 0.15s;
-  pointer-events: none;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  cursor: crosshair;
+  touch-action: none;
 }
-.pdf-sketch-container:hover .pdf-sketch-canvas-actions {
-  opacity: 1;
-  pointer-events: auto;
+
+/* ── Error message ────────────────────────────────────────────────────── */
+.pdf-sketch-error {
+  color: var(--text-error);
+  padding: 8px;
+  font-size: 13px;
 }
