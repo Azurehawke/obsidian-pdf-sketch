@@ -20,7 +20,7 @@ const DEFAULT_SETTINGS: SketchSettings = {
 };
 
 export default class PdfSketchPlugin extends Plugin {
-    settings!: SketchSettings;
+    declare settings: SketchSettings;
 
     async onload() {
         this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
