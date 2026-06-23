@@ -43176,18 +43176,25 @@ var DEFAULT_SETTINGS = {
 };
 var PdfSketchPlugin = class extends import_obsidian.Plugin {
   async onload() {
+    console.log("[pdf-sketch] plugin loading");
     this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+    console.log("[pdf-sketch] registering code block processor");
     this.registerMarkdownCodeBlockProcessor("pdf-sketch", async (source, el, ctx) => {
+      console.log("[pdf-sketch] processor fired, source:", source);
       const match = source.trim().match(/\[\[(.+?)\]\]/);
       if (!match) {
+        console.log("[pdf-sketch] no wikilink found");
         el.createEl("p", { cls: "pdf-sketch-error", text: "Usage: [[path/to/file.pdf]]" });
         return;
       }
+      console.log("[pdf-sketch] looking up file:", match[1]);
       const file = this.app.metadataCache.getFirstLinkpathDest(match[1], ctx.sourcePath);
       if (!(file instanceof import_obsidian.TFile)) {
+        console.log("[pdf-sketch] file not found:", match[1]);
         el.createEl("p", { cls: "pdf-sketch-error", text: `File not found: ${match[1]}` });
         return;
       }
+      console.log("[pdf-sketch] file found:", file.path);
       const container = el.createDiv({ cls: "pdf-sketch-container" });
       const toolbar = container.createDiv({ cls: "pdf-sketch-toolbar" });
       const toolSelect = toolbar.createEl("select", { attr: { title: "Drawing tool" } });
@@ -43233,7 +43240,9 @@ var PdfSketchPlugin = class extends import_obsidian.Plugin {
       let pdfBytes;
       try {
         pdfBytes = await this.app.vault.readBinary(file);
+        console.log("[pdf-sketch] read PDF bytes:", pdfBytes.byteLength);
       } catch (e) {
+        console.error("[pdf-sketch] failed to read file:", e);
         pagesEl.createEl("p", { cls: "pdf-sketch-error", text: "Could not read PDF file." });
         return;
       }
@@ -43241,7 +43250,9 @@ var PdfSketchPlugin = class extends import_obsidian.Plugin {
       let pdf;
       try {
         pdf = await loadingTask.promise;
+        console.log("[pdf-sketch] PDF loaded, pages:", pdf.numPages);
       } catch (e) {
+        console.error("[pdf-sketch] failed to parse PDF:", e);
         pagesEl.createEl("p", { cls: "pdf-sketch-error", text: "Could not parse PDF." });
         return;
       }
