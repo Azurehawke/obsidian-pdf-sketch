@@ -3,7 +3,6 @@ var __defProp = Object.defineProperty;
 var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
 var __getOwnPropNames = Object.getOwnPropertyNames;
 var __hasOwnProp = Object.prototype.hasOwnProperty;
-var __defNormalProp = (obj, key, value) => key in obj ? __defProp(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
 var __export = (target, all) => {
   for (var name in all)
     __defProp(target, name, { get: all[name], enumerable: true });
@@ -17,7 +16,6 @@ var __copyProps = (to, from, except, desc) => {
   return to;
 };
 var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
-var __publicField = (obj, key, value) => __defNormalProp(obj, typeof key !== "symbol" ? key + "" : key, value);
 
 // main.ts
 var main_exports = {};
@@ -34,17 +32,13 @@ var DEFAULT_SETTINGS = {
   canvasWidth: 100
 };
 var PdfSketchPlugin = class extends import_obsidian.Plugin {
-  constructor() {
-    super(...arguments);
-    __publicField(this, "settings");
-  }
   async onload() {
     this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
     this.addCommand({
       id: "insert-pdf-sketch-block",
       name: "Insert PDF Sketch Block",
       editorCallback: (editor) => {
-        editor.replaceSelection("\n```raster-sketch\n\n```\n");
+        editor.replaceSelection("\n```pdf-sketch\n\n```\n");
       }
     });
     this.registerMarkdownCodeBlockProcessor("pdf-sketch", (source, el, ctx) => {
