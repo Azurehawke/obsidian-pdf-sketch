@@ -220,7 +220,7 @@ export default class PdfSketchPlugin extends Plugin {
                     }, 1500);
                 } catch (e) {
                     console.error('pdf-sketch save error', e);
-                    saveBtn.setText('Error');
+                    saveBtn.setText('Error: ' + (e instanceof Error ? e.message : String(e)));
                     saveBtn.disabled = false;
                 }
             });
@@ -338,6 +338,7 @@ export default class PdfSketchPlugin extends Plugin {
         }
 
         const saved = await pdfDoc.save();
-        await this.app.vault.modifyBinary(file, saved.buffer as ArrayBuffer);
+        const buf = saved.buffer.slice(saved.byteOffset, saved.byteOffset + saved.byteLength);
+        await this.app.vault.modifyBinary(file, buf as ArrayBuffer);
     }
 }
