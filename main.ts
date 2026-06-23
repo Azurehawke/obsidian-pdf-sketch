@@ -1,9 +1,5 @@
 import { Plugin, TFile, setIcon } from 'obsidian';
-import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf';
 import { PDFDocument } from 'pdf-lib';
-
-// Run PDF.js in the main thread — no separate worker file needed
-pdfjsLib.GlobalWorkerOptions.workerSrc = '';
 
 type ToolMode = 'pen' | 'pencil' | 'marker' | 'eraser';
 
@@ -44,6 +40,18 @@ export default class PdfSketchPlugin extends Plugin {
                 return;
             }
             console.log('[pdf-sketch] file found:', file.path);
+
+            // Lazy-load pdfjs so a crash here doesn't prevent the plugin from loading
+            let pdfjsLib: typeof import('pdfjs-dist');
+            try {
+                pdfjsLib = require('pdfjs-dist/legacy/build/pdf');
+                pdfjsLib.GlobalWorkerOptions.workerSrc = '';
+                console.log('[pdf-sketch] pdfjs loaded');
+            } catch (e) {
+                console.error('[pdf-sketch] failed to load pdfjs:', e);
+                el.createEl('p', { cls: 'pdf-sketch-error', text: 'Failed to load PDF renderer: ' + e });
+                return;
+            }
 
             const container = el.createDiv({ cls: 'pdf-sketch-container' });
 
@@ -113,7 +121,7 @@ export default class PdfSketchPlugin extends Plugin {
             }
 
             const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(pdfBytes) });
-            let pdf: pdfjsLib.PDFDocumentProxy;
+            let pdf: any;
             try {
                 pdf = await loadingTask.promise;
                 console.log('[pdf-sketch] PDF loaded, pages:', pdf.numPages);
