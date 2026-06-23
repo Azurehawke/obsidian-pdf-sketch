@@ -126,43 +126,37 @@ export default class PdfSketchPlugin extends Plugin {
             setIcon(saveBtn, 'save');
             saveBtn.createEl('span', { text: 'Save' });
 
-            // ── Sticky toolbar via JS (Obsidian's scroll container varies) ───
+            // ── Sticky toolbar via IntersectionObserver ───────────────────────
+            // A sentinel sits just above the toolbar; when it scrolls out of
+            // view above the viewport we fix the toolbar in place.
+            const toolbarSentinel = container.createDiv();
+            toolbarSentinel.style.height = '1px';
+            container.insertBefore(toolbarSentinel, toolbar);
+
             const toolbarPlaceholder = container.createDiv();
             toolbarPlaceholder.style.height = '0';
             container.insertBefore(toolbarPlaceholder, toolbar.nextSibling);
 
-            const getScrollParent = (el: HTMLElement): HTMLElement => {
-                let p = el.parentElement;
-                while (p) {
-                    const { overflow, overflowY } = getComputedStyle(p);
-                    if (/(auto|scroll)/.test(overflow + overflowY)) return p;
-                    p = p.parentElement;
+            let toolbarFixed = false;
+            const stickyObserver = new IntersectionObserver(([entry]) => {
+                const shouldFix = !entry.isIntersecting && entry.boundingClientRect.top < 0;
+                if (shouldFix === toolbarFixed) return;
+                toolbarFixed = shouldFix;
+                if (shouldFix) {
+                    const cr = container.getBoundingClientRect();
+                    toolbar.addClass('pdf-sketch-toolbar--fixed');
+                    toolbar.style.top   = '0px';
+                    toolbar.style.left  = cr.left + 'px';
+                    toolbar.style.width = cr.width + 'px';
+                    toolbarPlaceholder.style.height = '38px';
+                } else {
+                    toolbar.removeClass('pdf-sketch-toolbar--fixed');
+                    toolbar.style.top = toolbar.style.left = toolbar.style.width = '';
+                    toolbarPlaceholder.style.height = '0';
                 }
-                return document.documentElement as HTMLElement;
-            };
-
-            // Defer until after DOM is attached so getBoundingClientRect is valid
-            setTimeout(() => {
-                const scrollEl = getScrollParent(container);
-                const onScroll = () => {
-                    const cr  = container.getBoundingClientRect();
-                    const sr  = scrollEl.getBoundingClientRect();
-                    const toolbarH = 38;
-                    if (cr.top < sr.top && cr.bottom > sr.top + toolbarH) {
-                        toolbar.addClass('pdf-sketch-toolbar--fixed');
-                        toolbar.style.top   = sr.top + 'px';
-                        toolbar.style.left  = cr.left + 'px';
-                        toolbar.style.width = cr.width + 'px';
-                        toolbarPlaceholder.style.height = toolbarH + 'px';
-                    } else {
-                        toolbar.removeClass('pdf-sketch-toolbar--fixed');
-                        toolbar.style.top = toolbar.style.left = toolbar.style.width = '';
-                        toolbarPlaceholder.style.height = '0';
-                    }
-                };
-                scrollEl.addEventListener('scroll', onScroll);
-                this.register(() => scrollEl.removeEventListener('scroll', onScroll));
-            }, 0);
+            }, { threshold: 0 });
+            stickyObserver.observe(toolbarSentinel);
+            this.register(() => stickyObserver.disconnect());
 
             // ── Pages area ───────────────────────────────────────────────────
             const pagesEl = container.createDiv({ cls: 'pdf-sketch-pages' });
