@@ -1,18 +1,20 @@
 import { Plugin, TFile, setIcon } from 'obsidian';
 import { PDFDocument } from 'pdf-lib';
 
-type ToolMode = 'pen' | 'pencil' | 'marker' | 'eraser';
+type ToolMode = 'pen' | 'pencil' | 'marker' | 'highlighter' | 'eraser';
 
 interface SketchSettings {
     color:     string;
     tool:      ToolMode;
     brushSize: number;
+    snapLines: boolean;
 }
 
 const DEFAULT_SETTINGS: SketchSettings = {
     color:     '#000000',
     tool:      'pen',
     brushSize: 3,
+    snapLines: false,
 };
 
 export default class PdfSketchPlugin extends Plugin {
@@ -63,12 +65,26 @@ export default class PdfSketchPlugin extends Plugin {
             const toolbar = container.createDiv({ cls: 'pdf-sketch-toolbar' });
 
             const toolSelect = toolbar.createEl('select', { attr: { title: 'Drawing tool' } });
-            (['pen', 'pencil', 'marker', 'eraser'] as ToolMode[]).forEach(t =>
+            (['pen', 'pencil', 'marker', 'highlighter', 'eraser'] as ToolMode[]).forEach(t =>
                 toolSelect.createEl('option', { text: t[0].toUpperCase() + t.slice(1), value: t })
             );
             toolSelect.value = this.settings.tool;
             toolSelect.addEventListener('change', () => {
                 this.settings.tool = toolSelect.value as ToolMode;
+                this.saveData(this.settings);
+            });
+
+            toolbar.createDiv({ cls: 'pdf-sketch-toolbar-sep' });
+
+            const snapBtn = toolbar.createEl('button', {
+                cls: 'pdf-sketch-toolbar-btn' + (this.settings.snapLines ? ' pdf-sketch-toolbar-btn--active' : ''),
+                attr: { title: 'Snap lines to 90°' },
+            });
+            setIcon(snapBtn, 'ruler');
+            snapBtn.createEl('span', { text: '90°' });
+            snapBtn.addEventListener('click', () => {
+                this.settings.snapLines = !this.settings.snapLines;
+                snapBtn.toggleClass('pdf-sketch-toolbar-btn--active', this.settings.snapLines);
                 this.saveData(this.settings);
             });
 
@@ -188,7 +204,7 @@ export default class PdfSketchPlugin extends Plugin {
                 });
 
                 this.attachDrawing(drawCanvas, pageIdx, toolSelect, colorInput, brushInput,
-                    undoStacks, redoStacks, () => syncUndoRedo(pageIdx));
+                    undoStacks, redoStacks, () => syncUndoRedo(pageIdx), snapBtn);
             }
 
             // ── Undo / Redo button handlers ───────────────────────────────────
@@ -240,12 +256,15 @@ export default class PdfSketchPlugin extends Plugin {
         undoStacks:  ImageData[][],
         redoStacks:  ImageData[][],
         onStroke:    () => void,
+        snapBtn:     HTMLButtonElement,
     ) {
         const ctx2d = canvas.getContext('2d')!;
         ctx2d.lineCap  = 'round';
         ctx2d.lineJoin = 'round';
 
         let drawing = false;
+        let startPos = { x: 0, y: 0 };
+        let preStrokeSnapshot: ImageData | null = null;
 
         const cssToCanvas = (e: PointerEvent) => {
             const r = canvas.getBoundingClientRect();
@@ -255,60 +274,98 @@ export default class PdfSketchPlugin extends Plugin {
             };
         };
 
-        const applyTool = (e: PointerEvent) => {
-            const tool = (e.buttons === 32 || e.buttons === 2)
-                ? 'eraser'
-                : toolSelect.value as ToolMode;
-            const w = parseInt(brushInput.value);
+        const applyTool = (tool: ToolMode, w: number) => {
             if (tool === 'eraser') {
                 ctx2d.globalCompositeOperation = 'destination-out';
                 ctx2d.globalAlpha = 1;
                 ctx2d.lineWidth   = 20;
+                ctx2d.lineCap     = 'round';
             } else {
                 ctx2d.globalCompositeOperation = 'source-over';
                 ctx2d.strokeStyle = colorInput.value;
                 if (tool === 'pen') {
                     ctx2d.globalAlpha = 1;
                     ctx2d.lineWidth   = w;
+                    ctx2d.lineCap     = 'round';
                 } else if (tool === 'pencil') {
                     ctx2d.globalAlpha = 0.65;
                     ctx2d.lineWidth   = Math.max(1, w * 0.8);
+                    ctx2d.lineCap     = 'round';
                 } else if (tool === 'marker') {
                     ctx2d.globalAlpha = 0.35;
                     ctx2d.lineWidth   = w * 3;
+                    ctx2d.lineCap     = 'round';
+                } else if (tool === 'highlighter') {
+                    ctx2d.globalAlpha = 0.4;
+                    ctx2d.lineWidth   = w * 4;
+                    ctx2d.lineCap     = 'square';
                 }
             }
         };
 
+        const getTool = (e: PointerEvent): ToolMode =>
+            (e.buttons === 32 || e.buttons === 2) ? 'eraser' : toolSelect.value as ToolMode;
+
         canvas.addEventListener('pointerdown', (e) => {
-            // Save state for undo before stroke begins
             undoStacks[pageIdx].push(ctx2d.getImageData(0, 0, canvas.width, canvas.height));
             if (undoStacks[pageIdx].length > 30) undoStacks[pageIdx].shift();
             redoStacks[pageIdx].length = 0;
 
             drawing = true;
-            const pos = cssToCanvas(e);
-            ctx2d.beginPath();
-            ctx2d.moveTo(pos.x, pos.y);
-            applyTool(e);
+            startPos = cssToCanvas(e);
+
+            const tool = getTool(e);
+            const w    = parseInt(brushInput.value);
+            applyTool(tool, w);
+
+            if (snapBtn.hasClass('pdf-sketch-toolbar-btn--active') && tool !== 'eraser') {
+                // Snapshot before stroke so we can redraw clean line each move
+                preStrokeSnapshot = ctx2d.getImageData(0, 0, canvas.width, canvas.height);
+            } else {
+                preStrokeSnapshot = null;
+                ctx2d.beginPath();
+                ctx2d.moveTo(startPos.x, startPos.y);
+            }
+
             canvas.setPointerCapture(e.pointerId);
         });
 
         canvas.addEventListener('pointermove', (e) => {
             if (!drawing) return;
-            applyTool(e);
-            const pos = cssToCanvas(e);
-            ctx2d.lineTo(pos.x, pos.y);
-            ctx2d.stroke();
+            const tool = getTool(e);
+            const w    = parseInt(brushInput.value);
+            applyTool(tool, w);
+            let pos = cssToCanvas(e);
+
+            if (preStrokeSnapshot) {
+                // Snap to horizontal or vertical
+                const dx = Math.abs(pos.x - startPos.x);
+                const dy = Math.abs(pos.y - startPos.y);
+                if (dx >= dy) {
+                    pos = { x: pos.x, y: startPos.y };
+                } else {
+                    pos = { x: startPos.x, y: pos.y };
+                }
+                ctx2d.putImageData(preStrokeSnapshot, 0, 0);
+                ctx2d.beginPath();
+                ctx2d.moveTo(startPos.x, startPos.y);
+                ctx2d.lineTo(pos.x, pos.y);
+                ctx2d.stroke();
+            } else {
+                ctx2d.lineTo(pos.x, pos.y);
+                ctx2d.stroke();
+            }
         });
 
         const stopDrawing = () => {
             if (!drawing) return;
             drawing = false;
+            preStrokeSnapshot = null;
             ctx2d.globalAlpha = 1;
+            ctx2d.lineCap = 'round';
             onStroke();
         };
-        canvas.addEventListener('pointerup',    stopDrawing);
+        canvas.addEventListener('pointerup',     stopDrawing);
         canvas.addEventListener('pointercancel', stopDrawing);
     }
 

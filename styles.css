@@ -107,6 +107,14 @@
   color: var(--interactive-accent);
   font-weight: 500;
 }
+.pdf-sketch-toolbar-btn--active {
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+}
+.pdf-sketch-toolbar-btn--active:hover {
+  background: var(--interactive-accent-hover);
+  color: var(--text-on-accent);
+}
 
 /* ── Pages ────────────────────────────────────────────────────────────── */
 .pdf-sketch-pages {
